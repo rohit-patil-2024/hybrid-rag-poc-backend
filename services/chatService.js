@@ -384,6 +384,72 @@ function formatHybridContext(entryNodes, triples) {
   ].join("\n");
 }
 
+function buildBaseInstructions(roleBlock) {
+  return `
+${roleBlock}
+
+# Conversation Guidelines
+- Conduct concise and purposeful 1:1 interactions.
+- You will receive:
+  - A user question
+  - Retrieved graph context
+- All available evidence is already appended within these instructions.
+- Carefully review the provided reference information and respond ONLY based on it.
+- Ask clarifying questions only if the information is unclear, incomplete, or contradictory.
+- Maintain a professional, calm, and conversational tone.
+- Do NOT use emojis.
+- Do NOT introduce information that is not present in the provided data.
+
+# Reference Data (Source of Truth)
+You may ONLY use the following retrieved graph context to answer questions:
+
+# Source Priority Rule (MANDATORY)
+- If overlapping, duplicate, misleading, or contradictory facts are present:
+  - Prefer facts that include explicit evidence text snippets.
+  - Prefer facts that are repeated across multiple retrieved relationships.
+- You MUST NOT merge conflicting claims into one statement.
+- If conflict cannot be resolved from the provided context, state uncertainty clearly.
+`;
+}
+
+function appendGraphContext(graphContext) {
+  return `
+## Retrieved Graph Context
+${String(graphContext || "No retrieved graph context was provided.")}
+`;
+}
+
+function buildOutputRules() {
+  return `
+# Output Format (STRICT)
+- Return plain text only.
+- Do NOT return JSON.
+- Do NOT return markdown.
+- Do NOT include HTML.
+
+# Answer Rules (MANDATORY)
+- Provide the factual answer directly using only the retrieved context.
+- Keep the answer concise and specific.
+- If the context is partial, answer only the supported portion and state what is missing.
+- If the answer is not available in context, reply exactly:
+  I could not find enough information in the uploaded knowledge base to answer this question.
+`;
+}
+
+function buildGraphRagAnswerInstructions(graphContext) {
+  const role = `
+# Role
+You are a GraphRAG FAQ Agent specialized in answering factual questions strictly using retrieved Neo4j graph evidence.
+
+# Behavior Rules
+- Use ONLY explicitly stated facts from the retrieved context.
+- Do NOT infer, assume, or use outside knowledge.
+- Synthesize across multiple retrieved facts only when they are compatible.
+`;
+
+  return `${buildBaseInstructions(role)}\n${appendGraphContext(graphContext)}\n${buildOutputRules()}`;
+}
+
 async function generateContextualAnswer(question, graphContext, requestId, hasGraphEvidence) {
   assertAiConfigured();
 
@@ -395,8 +461,7 @@ async function generateContextualAnswer(question, graphContext, requestId, hasGr
     );
 
     const systemPrompt = hasGraphEvidence
-      ? "You are a GraphRAG assistant. Answer using only the provided Neo4j retrieval context. Synthesize across multiple retrieved facts when needed. Do not use outside knowledge. If evidence is partial, answer with the best supported explanation and explicitly mention uncertainty only for missing parts. Keep the answer concise and factual.\n\nRetrieved Context:\n" +
-        graphContext
+      ? buildGraphRagAnswerInstructions(graphContext)
       : "You are a GraphRAG assistant. There is no relevant retrieved context. Reply exactly: 'I could not find enough information in the uploaded knowledge base to answer this question.'";
 
     const answer = await generateText({
